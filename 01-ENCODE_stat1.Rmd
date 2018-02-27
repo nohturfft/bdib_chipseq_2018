@@ -70,14 +70,17 @@ The 'BSgenome.Hsapiens.UCSC.hg19' package provides the complete genome sequences
   
 BSgenome packages for other genomes can be found with the following command: `BSgenome::available.genomes()`.  
 ```{r}
-pkg.lib <- "/usr/lib64/R/library"
+# pkg.lib <- "/usr/lib64/R/library"
+pkg.lib <- "packages"
+library(magrittr, lib.loc=pkg.lib)
 library(readr, lib.loc=pkg.lib)
+
 library(rGADEM, lib.loc=pkg.lib)
 library(MotIV, lib.loc=pkg.lib)
 library(JASPAR2014, lib.loc=pkg.lib)
 library(TFBSTools, lib.loc=pkg.lib)
 library(BSgenome.Hsapiens.UCSC.hg19, lib.loc=pkg.lib)
-library(magrittr, lib.loc=pkg.lib)
+
 ```
 
 ### Script name + working directory  
