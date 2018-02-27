@@ -78,6 +78,8 @@ list.files(pkg.lib)
 ```{r}
 # pkg.lib <- "/usr/lib64/R/library"
 # pkg.lib <- "packages"
+.libPaths(pkg.lib)
+.libPaths()
 library(magrittr, lib.loc=pkg.lib)
 library(readr, lib.loc=pkg.lib)
 
