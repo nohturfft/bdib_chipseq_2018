@@ -1,0 +1,317 @@
+---
+title: "What is the IRF1 consensus binding motif?"
+author: "Axel Nohturfft"
+date: "31-January-2017"
+output:
+  html_notebook:
+    toc: TRUE
+    toc_float: TRUE
+    toc_depth: 3
+    code_folding: "hide"
+    number_sections: FALSE
+    theme: "sandstone"
+    highlight: "tango"
+    fig_caption: TRUE
+---
+
+<style>
+h2 {background: brown;color: white;padding-left: 7px;}
+h3 {color: brown;}
+</style>
+
+## Objective:  
+Search STAT1 ChIP-seq peaks for a common sequence motif. Compare to known STAT1 binding element.
+
+## Introduction:  
+Searching for common DNA sequence elements among a set of promoters of ChIP-seq peaks is a common task in functional genomics.  
+As with the last session, we will begin our analyses with a large table of chip-seq data from the ENCODE project. This so-called 'summary track' is a table that contains processed peak locations for 161 transcription factors from 91 different cell lines.  
+This time we will extract the peaks for the transcription factor IRF1 and then search the peak sequences for common sequence motifs.  
+Any motifs returned by this search will be compared against the JASPAR database of known transcription factor binding sites.  
+
+## SCRIPT OVERVIEW:
+
+1. Clear memory and console
+2. Set working directory
+3. Load packages
+4. Read ChIP-seq peak data from ENCODE
+5. Add column headers to chip-seq data frame
+6. Extract data specific for IRF1
+8. Keep only peaks found in at least 4 experiments
+8. Keep only peaks with a score of 1000
+9. Based on peak coordinates, obtain actual DNA sequence for each peak
+10. Search for sequence motifs (rGADEM opackage)  
+11. Extract position weight matrices from the results  
+12. Plot sequence logos of motif(s) found by rGADEM  
+13. Compare rGADEM motif to JASPAR database of known motifs  
+
+## Setting things up...  
+### Clear memory and console  
+```{r clear memory and console}
+rm(list=ls(all=T)) # clear memory
+cat("\014") # clear console
+options(stringsAsFactors = FALSE)
+```
+
+
+### Parameters:  
+```{r}
+tf <- "STAT1"
+expcount.min <- 5
+score.min <- 700
+```
+
+
+### Load Packages 
+To get a list of all the functions and data provided by a specific package type for example `help(package="ChIPpeakAnno")`. On [CRAN](http://cran.r-project.org/web/packages/) and [Bioconductor](http://www.bioconductor.org/) you will also find detailed manuals and often so-called 'Vignettes' that provide worked examples. 
+  
+The rGADEM package provides tools to search for common motifs among a set of DNA sequences. For help about the rGADEM package, type: `help(package="rGADEM")`.  
+  
+The 'BSgenome.Hsapiens.UCSC.hg19' package provides the complete genome sequences for Homo sapiens (UCSC version hg19). This package is essential to obtain the DNA sequences that correspond to the peak coordinates from ENCODE. Loading this library creates a BSgenome object 'Hsapiens' that we will use later with rGADEM.  
+  
+BSgenome packages for other genomes can be found with the following command: `BSgenome::available.genomes()`.  
+```{r}
+pkg.lib <- "/usr/lib64/R/library"
+library(readr, lib.loc=pkg.lib)
+library(rGADEM, lib.loc=pkg.lib)
+library(MotIV, lib.loc=pkg.lib)
+library(JASPAR2014, lib.loc=pkg.lib)
+library(TFBSTools, lib.loc=pkg.lib)
+library(BSgenome.Hsapiens.UCSC.hg19, lib.loc=pkg.lib)
+library(magrittr, lib.loc=pkg.lib)
+```
+
+### Script name + working directory  
+```{r}
+adc <- rstudioapi::getActiveDocumentContext()
+pfad <- strsplit(adc$path, split="/")[[1]]
+this.script <- pfad[length(pfad)]
+wd <- paste(pfad[-length(pfad)], collapse="/")
+setwd(wd)
+rm(adc, pfad)
+cat("**Working directory:**", wd, "\n**Script name:**", this.script, sep="\n")
+```
+
+## Read and prepare ChIP-seq peak data from ENCODE  
+The dataset from ENCODE that we'll use for this tutorial is a "summary track" that contains the ChIP-seq peak data compiled from many experiments, using a large number of antibodies and cell lines. This summary track was designed to display ChIP-seq peaks in the UCSC Genome Browser, but is also an excellent resource for data mining.  
+The original ENCODE track was downloaded from this site: [http://hgdownload.cse.ucsc.edu/goldenpath/hg19/encodeDCC/wgEncodeRegTfbsClustered/](http://hgdownload.cse.ucsc.edu/goldenpath/hg19/encodeDCC/wgEncodeRegTfbsClustered/)  
+... and is described here:  
+[http://genome.ucsc.edu/cgi-bin/hgTrackUi?db=hg19&g=wgEncodeRegTfbsClusteredV3](http://genome.ucsc.edu/cgi-bin/hgTrackUi?db=hg19&g=wgEncodeRegTfbsClusteredV3)  
+
+Column headers:  
+bin  chrom  chromStart	chromEnd	name	score	expCount	expNums	expScores
+
+The '.gz' extension of the data file name indicates that the file has been compressed (the current file size is 85MB; uncompressed it would be 256MB!). Conveniently, R opens gzip-compressed files without needing special instructions.
+
+### Read data file:  
+(This can take a moment ...)  
+```{r}
+# track.file <- "../BDiB_Session_03/Session_03_R/wgEncodeRegTfbsClusteredV3.bed.gz"
+# stopifnot(file.exists(track.file))
+# df <- readr::read_tsv(file=track.file,
+#                       col_names=FALSE,
+#                       col_types = list(col_character(), col_integer(), col_integer(),
+#                                        col_character(), col_integer(), col_integer(),
+#                                        col_character(), col_character()),
+#                       n_max=4380460, progress = FALSE)
+# df <- as.data.frame(df)
+# out.file.df <- paste0(this.script, ".df.rds") # "Session_04_Motif_Search_FOXP2_2017.Rmd.df.rds"
+# saveRDS(df, file=out.file.df, compress="bzip2")
+df <- readRDS("Session_04_Motif_Search_FOXP2_2017.Rmd.df.rds")
+# pryr::object_size(df) %>% format(big.mark=",") %>% cat(., "bytes")
+```
+
+### Add column headers to chip-seq data frame:  
+Based on [track information](http://genome.ucsc.edu/cgi-bin/hgTrackUi?db=hg19&g=wgEncodeRegTfbsClusteredV3) from ENCODE we now assign descriptive column headers to the data frame ...  
+```{r}
+names(df) <- c("chrom", "chromStart", "chromEnd", "name", "score", "expCount", "expNums", "expScores")
+print(head(df))
+```
+
+According to the ENCODE info, the dataset should store peak coordinates for 161 DNA binding proteins. Check:  
+```{r}
+df$name %>% as.character %>% unique %>% length %>% cat
+```
+
+```{r}
+df$name %>% as.character %>% unique %>% sort %>% cat(sep=", ")
+```
+
+
+## Extract relevant peaks from the track data  
+### Extract data specific for IRF1  
+Then print the number of IRF1 peaks.  
+```{r}
+irf1 <- subset(df, name==tf)
+nrow(irf1) %>% format(big.mark=",") %>% cat
+# FOXP2: 27,652
+# STAT1: 19,147
+```
+
+```{r}
+# Clear some memory by removing the original data frame
+# rm(df)
+# gc(verbose = FALSE)
+```
+
+```{r}
+range(irf1$expCount)
+# MYC: 1 21
+# FOXP2: 1 2
+# STAT1L 1 6
+```
+
+```{r}
+hist(irf1$score)
+```
+
+
+### Some filtering:  
+Keep only peaks found in at least 4 experiments and with a score of at least 1000.  
+```{r}
+# expcount.min <- 5
+# score.min <- 700
+irf1.b <- subset(irf1, expCount >= expcount.min) # MYC: 20, FOXP2: 2; stat1: 5
+irf1.c <- subset(irf1.b, score >= score.min) # MYC: 1000; FOXP2: 700; stat1: 700
+nrow(irf1.c) %>% cat("Number of remaining peaks:", .)
+# MYC: 
+# MYC: Number of remaining peaks: 284
+# FOXP2: Number of remaining peaks: 155
+# STAT1: Number of remaining peaks: 93
+```
+
+## Get DNA sequence for each peak  
+```{r}
+chr <- irf1.c$chrom
+start <- irf1.c$chromStart
+end <- irf1.c$chromEnd
+seq.ds <- Biostrings::getSeq(Hsapiens, names=chr, start=start, end=end)
+rm(chr, start, end)
+class(seq.ds)
+```
+
+Let's have a look:  
+```{r}
+seq.ds
+```
+
+
+## Search for common DNA motifs  
+Motif search - key input for the 'GADEM()' function:  
+
+1. Sequences in "DNAStringSet" format  
+2. a BSgenome object (here for Hsapiens)  
+
+The code below can take a long tie to execute if the number of peaks is large.
+```{r}
+gadem.results <- rGADEM::GADEM(seq.ds, verbose=TRUE, genome=Hsapiens)
+# class(gadem.results) # "gadem" (rGADEM)
+```
+
+
+```{r save rGADEM results}
+file.name.1 <- paste0(this.script, ".RDS")
+saveRDS(object=gadem.results, file=file.name.1, compress="bzip2")
+system(paste("du -h", file.name.1), intern=TRUE) %>% cat
+```
+
+### Extract position weight matrices from GADEM results:  
+```{r}
+pwm.list <- getPWM(gadem.results)
+length(pwm.list) %>% cat("Number of motifs found:", ., "\n")
+# stat1: Number of motifs found: 3 
+```
+
+Name the motifs:  
+```{r}
+nams <- paste0("Motif", 1:length(pwm.list))
+names(pwm.list) <- nams
+rm(nams)
+lapply(pwm.list, class)
+```
+
+A position weight matrix (PWM) gives the relative frequencies for each of the four bases for the positions of a motif.  
+  
+First motif:
+```{r}
+pwm.list[[1]]
+```
+
+Second motif:  
+```{r}
+pwm.list[[2]]
+```
+
+Third motif:
+```{r}
+pwm.list[[3]]
+```
+
+### Plot sequence logos of motif(s) found by rGADEM:  
+**MOTIF 1**  
+```{r}
+seqLogo::seqLogo(pwm.list[[1]])
+```
+
+Plot sequence logo for Motif 1 in the reverse complement orientation:  
+```{r}
+seqLogo::seqLogo(reverseComplement(pwm.list[[1]]))
+```
+
+**MOTIF 2**  
+```{r}
+seqLogo::seqLogo(pwm.list[[2]])
+```
+
+Motif 2 in reverse complement orientation:  
+```{r}
+seqLogo::seqLogo(reverseComplement(pwm.list[[2]]))
+```
+
+**MOTIF 3**  
+```{r}
+seqLogo::seqLogo(pwm.list[[3]])
+```
+
+### Compare rGADEM motif to JASPAR database of known motifs:  
+First, trim motif edges (requires MotIV package):  
+```{r}
+gadem.pwm.trim <- lapply(pwm.list, trimPWMedge, threshold=1)
+seqLogo::seqLogo(gadem.pwm.trim[[1]])
+seqLogo::seqLogo(gadem.pwm.trim[[2]])
+seqLogo::seqLogo(gadem.pwm.trim[[3]])
+```
+
+Now look for matches in the JASPAR database:  
+```{r}
+gadem.1.analysis.jaspar <- MotIV::motifMatch(gadem.pwm.trim)
+# class(gadem.1.analysis.jaspar) # "motiv" (MotIV)
+summary(gadem.1.analysis.jaspar)
+```
+
+Set filters to extract motif hits from MotIV results (Unfortunately, the methods from the MotIV package are rather arcane!!):  
+```{r}
+f.irf1 <- MotIV::setFilter(tfname="IRF1")
+f.sp1 <- MotIV::setFilter(tfname="SP1")
+# Combine two filters:
+f.irf1.sp1 <- f.irf1 | f.sp1
+# Apply filters:
+fil <- filter(gadem.1.analysis.jaspar, f.irf1.sp1, exact=FALSE, verbose=FALSE)
+
+# Show plot comparing the discovered motifs to matches in the JASPAR database:
+plot(fil)
+```
+
+
+**CONCLUSION:** Motif 1 is a very good match to the established IRF1 site!
+
+Alignments (based on consensus sequences rather than PWMs):
+```{r}
+alignments <- viewAlignments(fil)
+print(alignments)
+```
+
+Finally, keep a record of the system settings and package versions:
+```{r}
+sessionInfo()
+```
+
