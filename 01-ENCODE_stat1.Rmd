@@ -55,8 +55,8 @@ options(stringsAsFactors = FALSE)
 
 ### Parameters:  
 ```{r}
-tf <- "STAT1"
-expcount.min <- 5
+tf <- "IRF1"
+expcount.min <- 4
 score.min <- 700
 ```
 
@@ -84,9 +84,9 @@ library(magrittr, lib.loc=pkg.lib)
 library(readr, lib.loc=pkg.lib)
 
 library(rGADEM, lib.loc=pkg.lib)
-library(MotIV, lib.loc=pkg.lib)
+# library(MotIV, lib.loc=pkg.lib)
 library(JASPAR2014, lib.loc=pkg.lib)
-library(TFBSTools, lib.loc=pkg.lib)
+# library(TFBSTools, lib.loc=pkg.lib)
 library(BSgenome.Hsapiens.UCSC.hg19, lib.loc=pkg.lib)
 
 ```
@@ -116,19 +116,14 @@ The '.gz' extension of the data file name indicates that the file has been compr
 ### Read data file:  
 (This can take a moment ...)  
 ```{r}
-# track.file <- "../BDiB_Session_03/Session_03_R/wgEncodeRegTfbsClusteredV3.bed.gz"
-# stopifnot(file.exists(track.file))
-# df <- readr::read_tsv(file=track.file,
-#                       col_names=FALSE,
-#                       col_types = list(col_character(), col_integer(), col_integer(),
-#                                        col_character(), col_integer(), col_integer(),
-#                                        col_character(), col_character()),
-#                       n_max=4380460, progress = FALSE)
-# df <- as.data.frame(df)
-# out.file.df <- paste0(this.script, ".df.rds") # "Session_04_Motif_Search_FOXP2_2017.Rmd.df.rds"
-# saveRDS(df, file=out.file.df, compress="bzip2")
-df <- readRDS("Session_04_Motif_Search_FOXP2_2017.Rmd.df.rds")
-# pryr::object_size(df) %>% format(big.mark=",") %>% cat(., "bytes")
+data.file <- paste0(pkg.lib, "/Session_04_Motif_Search_FOXP2_2017.Rmd.df.rds")
+data.file
+stopifnot(file.exists(data.file))
+```
+
+```{r}
+df <- readRDS(data.file)
+pryr::object_size(df)
 ```
 
 ### Add column headers to chip-seq data frame:  
@@ -164,6 +159,7 @@ nrow(irf1) %>% format(big.mark=",") %>% cat
 # gc(verbose = FALSE)
 ```
 
+Given a vector of numbers the `range()` function returns the highest and lowest of the numbers:  
 ```{r}
 range(irf1$expCount)
 # MYC: 1 21
@@ -171,23 +167,36 @@ range(irf1$expCount)
 # STAT1L 1 6
 ```
 
+#### Draw a histogram of the IRF1 peak scores  
 ```{r}
 hist(irf1$score)
 ```
 
 
 ### Some filtering:  
-Keep only peaks found in at least 4 experiments and with a score of at least 1000.  
+Keep only peaks found in a minimum number of experiments and with a minimum score.  
+
+Minimum number of experiments (defined at start of script):  
+```{r}
+cat(expcount.min)
+# The line of code will give an error if the expcount.min is too large
+stopifnot(expcount.min <= max(irf1$expCount))
+```
+
+Minimum score (defined at start of script):  
+```{r}
+cat(score.min)
+# The line of code will give an error if the expcount.min is too large
+stopifnot(expcount.min <= max(irf1$score))
+```
+
+
 ```{r}
 # expcount.min <- 5
 # score.min <- 700
-irf1.b <- subset(irf1, expCount >= expcount.min) # MYC: 20, FOXP2: 2; stat1: 5
+irf1.b <- subset(irf1, expCount >= expcount.min) 
 irf1.c <- subset(irf1.b, score >= score.min) # MYC: 1000; FOXP2: 700; stat1: 700
 nrow(irf1.c) %>% cat("Number of remaining peaks:", .)
-# MYC: 
-# MYC: Number of remaining peaks: 284
-# FOXP2: Number of remaining peaks: 155
-# STAT1: Number of remaining peaks: 93
 ```
 
 ## Get DNA sequence for each peak  
@@ -200,25 +209,25 @@ rm(chr, start, end)
 class(seq.ds)
 ```
 
-Let's have a look:  
+Let's have a look. By default `print()`'ing shows the fist nd last nucleotides of a sequence, and the first and last 5 sequences of a set:    
 ```{r}
-seq.ds
+print(seq.ds)
 ```
 
 
 ## Search for common DNA motifs  
-Motif search - key input for the 'GADEM()' function:  
+Motif search - key input for the `GADEM()` function:  
 
 1. Sequences in "DNAStringSet" format  
 2. a BSgenome object (here for Hsapiens)  
 
-The code below can take a long tie to execute if the number of peaks is large.
+The code below can take a long time to execute if the number of peaks is large.
 ```{r}
 gadem.results <- rGADEM::GADEM(seq.ds, verbose=TRUE, genome=Hsapiens)
 # class(gadem.results) # "gadem" (rGADEM)
 ```
 
-
+### Save rGadem results  
 ```{r save rGADEM results}
 file.name.1 <- paste0(this.script, ".RDS")
 saveRDS(object=gadem.results, file=file.name.1, compress="bzip2")
@@ -232,15 +241,24 @@ length(pwm.list) %>% cat("Number of motifs found:", ., "\n")
 # stat1: Number of motifs found: 3 
 ```
 
-Name the motifs:  
+What kind of object is pwm.list?  
 ```{r}
-nams <- paste0("Motif", 1:length(pwm.list))
-names(pwm.list) <- nams
-rm(nams)
-lapply(pwm.list, class)
+class(pwm.list)
 ```
 
+List items can have names. Name the motifs:  
+```{r}
+names(pwm.list) <- paste0("Motif", 1:length(pwm.list))
+```
+
+What kind of objects are the list items?  
+```{r}
+sapply(pwm.list, class)
+```
+
+
 A position weight matrix (PWM) gives the relative frequencies for each of the four bases for the positions of a motif.  
+We extract items from a list (subsetting) using double square brackets.
   
 First motif:
 ```{r}
@@ -252,9 +270,9 @@ Second motif:
 pwm.list[[2]]
 ```
 
-Third motif:
+Third motif: not applicable for IRF1
 ```{r}
-pwm.list[[3]]
+# pwm.list[[3]]
 ```
 
 ### Plot sequence logos of motif(s) found by rGADEM:  
@@ -280,46 +298,10 @@ seqLogo::seqLogo(reverseComplement(pwm.list[[2]]))
 
 **MOTIF 3**  
 ```{r}
-seqLogo::seqLogo(pwm.list[[3]])
-```
-
-### Compare rGADEM motif to JASPAR database of known motifs:  
-First, trim motif edges (requires MotIV package):  
-```{r}
-gadem.pwm.trim <- lapply(pwm.list, trimPWMedge, threshold=1)
-seqLogo::seqLogo(gadem.pwm.trim[[1]])
-seqLogo::seqLogo(gadem.pwm.trim[[2]])
-seqLogo::seqLogo(gadem.pwm.trim[[3]])
-```
-
-Now look for matches in the JASPAR database:  
-```{r}
-gadem.1.analysis.jaspar <- MotIV::motifMatch(gadem.pwm.trim)
-# class(gadem.1.analysis.jaspar) # "motiv" (MotIV)
-summary(gadem.1.analysis.jaspar)
-```
-
-Set filters to extract motif hits from MotIV results (Unfortunately, the methods from the MotIV package are rather arcane!!):  
-```{r}
-f.irf1 <- MotIV::setFilter(tfname="IRF1")
-f.sp1 <- MotIV::setFilter(tfname="SP1")
-# Combine two filters:
-f.irf1.sp1 <- f.irf1 | f.sp1
-# Apply filters:
-fil <- filter(gadem.1.analysis.jaspar, f.irf1.sp1, exact=FALSE, verbose=FALSE)
-
-# Show plot comparing the discovered motifs to matches in the JASPAR database:
-plot(fil)
+# seqLogo::seqLogo(pwm.list[[3]])
 ```
 
 
-**CONCLUSION:** Motif 1 is a very good match to the established IRF1 site!
-
-Alignments (based on consensus sequences rather than PWMs):
-```{r}
-alignments <- viewAlignments(fil)
-print(alignments)
-```
 
 Finally, keep a record of the system settings and package versions:
 ```{r}
